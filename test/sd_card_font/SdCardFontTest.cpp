@@ -430,29 +430,34 @@ TEST(SdCardFontTest, AdvancesStayCorrectWhenPagesAddCodepointsOutOfOrder) {
   }
 }
 
-TEST(SdCardFontTest, AdvanceMergesPastTheCapKeepTheLowestCodepoints) {
-  constexpr uint32_t CACHE_LIMIT = 768;  // SdCardFont::ADVANCE_CACHE_LIMIT
-  constexpr uint32_t GLYPH_COUNT = 1001;
+TEST(SdCardFontTest, AdvanceMergesPastTheCapKeepEarlierEntriesAndReadNothingMore) {
+  constexpr uint32_t CACHE_LIMIT = 1024;  // SdCardFont::ADVANCE_CACHE_LIMIT
+  constexpr uint32_t GLYPH_COUNT = 1301;
   makeFont(GLYPH_COUNT);
   for (uint32_t i = 0; i < GLYPH_COUNT; ++i) {
     put16(64 + 24 + i * sizeof(EpdGlyph) + offsetof(EpdGlyph, advanceX), (20 + i % 13) << 4);
   }
   SdCardFont font;
   ASSERT_TRUE(font.load("fixture"));
-  // Reference: the sorted union of every page, truncated to the cap; a full table takes nothing more.
+  // Reference: each page adds its lowest codepoints until the cap; nothing
+  // already cached is ever evicted, and a full table reads nothing more.
   std::vector<uint32_t> expected;
-  for (uint32_t block : {6U, 1U, 9U, 3U, 0U, 7U, 4U, 8U, 2U, 5U}) {
+  for (uint32_t block : {12U, 6U, 1U, 9U, 3U, 0U, 7U, 4U, 8U, 2U, 5U, 11U, 10U}) {
+    const size_t readsBefore = sdFontTestReads;
     ASSERT_GE(font.buildAdvanceTable(page(FIRST + block * 100, 100).c_str(), 1), 0);
-    if (expected.size() < CACHE_LIMIT) {
-      for (uint32_t cp = FIRST + block * 100; cp < FIRST + block * 100 + 100; ++cp) expected.push_back(cp);
-      std::sort(expected.begin(), expected.end());
-      if (expected.size() > CACHE_LIMIT) expected.resize(CACHE_LIMIT);
+    if (expected.size() >= CACHE_LIMIT) {
+      EXPECT_EQ(sdFontTestReads, readsBefore) << block;
     }
-    for (uint32_t cp = FIRST; cp < FIRST + 1000; ++cp) {
-      const bool cached = std::binary_search(expected.begin(), expected.end(), cp);
+    for (uint32_t cp = FIRST + block * 100; cp < FIRST + block * 100 + 100 && expected.size() < CACHE_LIMIT; ++cp) {
+      expected.push_back(cp);
+    }
+    for (uint32_t cp = FIRST; cp < FIRST + 1300; ++cp) {
+      const bool cached = std::find(expected.begin(), expected.end(), cp) != expected.end();
       ASSERT_EQ(cached ? (20 + (cp - FIRST) % 13) << 4 : 0, font.getAdvance(cp, 0)) << block << " " << std::hex << cp;
     }
   }
+  // The highest block (12) came first and stays cached once the table is full.
+  EXPECT_NE(0, font.getAdvance(FIRST + 1299, 0));
 }
 
 TEST(SdCardFontTest, AnEmptyOrFailedAdvanceBuildLeavesNoTable) {

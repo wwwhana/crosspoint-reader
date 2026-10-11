@@ -1,6 +1,7 @@
 #pragma once
 #include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
+#include <HangulComposer.h>
 
 #include <atomic>
 #include <cstdint>
@@ -55,6 +56,9 @@ class KeyboardEntryActivity : public Activity {
   bool shifted = false;
   bool symbols = false;
   bool urlPanel = false;  // URL snippet panel replaces the letter layer
+  // Syllable under construction on the Korean layout. Its text sits just
+  // before the cursor; any other edit of the field drops it (hangulInSync).
+  HangulComposer hangul;
 
   // Key hit rects registered by the keyboard component during render(); loop()
   // routes touch snapshots against them. The 5-row EN layout registers 41 keys,
@@ -131,6 +135,13 @@ class KeyboardEntryActivity : public Activity {
 
   void insertUtf8(const char* out);
   bool backspaceUtf8();
+  bool onHangulLayout() const;
+  // True while the bytes before the cursor are the composer's syllable.
+  bool hangulInSync() const;
+  // Routes a key's text through the composer on the Korean layout; plain
+  // insert elsewhere. Returns true when the field changed.
+  bool insertKeyText(const char* out);
+  void applyHangulEdit(const HangulComposer::Edit& edit);
   static size_t utf8Prev(const std::string& s, size_t pos);
   static size_t utf8Next(const std::string& s, size_t pos);
 

@@ -145,6 +145,10 @@ What this means in practice:
 - If no SD font is selected (a built-in reading font is active), there is no
   fallback and the UI again shows boxes for non-Latin text — pick an SD font
   covering that script to restore it.
+- The same fallback draws the Korean UI translation and the Korean keyboard's
+  key labels. Select a Hangul family (Pretendard, RIDIBatang, MaruBuri) as the
+  reader font before switching the UI language to Korean; without one the
+  menus and the jamo keys show replacement boxes, though typing still works.
 
 ## Available Pre-Built Fonts
 

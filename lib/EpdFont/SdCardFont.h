@@ -307,7 +307,11 @@ class SdCardFont {
   // Bounded to ADVANCE_CACHE_LIMIT entries; persists across layout passes
   // (across calls to clearCache()) so repeated indexing of the same font
   // amortizes SD reads. Cleared only on font unload or clearPersistentCache().
-  static constexpr uint32_t ADVANCE_CACHE_LIMIT = 768;
+  // Codepoints past the cap measure through the on-demand glyph miss path
+  // (one file open + two reads per occurrence), so the cap is sized for a
+  // chapter's unique codepoints: a Latin chapter needs ~100, a Korean one
+  // 700-900 (a 20k-character chapter measured at ~830). 8 KB per style.
+  static constexpr uint32_t ADVANCE_CACHE_LIMIT = 1024;
   AdvanceEntry* advanceTable_[MAX_STYLES] = {};
   uint32_t advanceTableSize_[MAX_STYLES] = {};
   // Allocated entries. Merges fill spare capacity in place, and growth doubles it,
@@ -315,8 +319,9 @@ class SdCardFont {
   uint32_t advanceTableCapacity_[MAX_STYLES] = {};
   bool advanceTableLookup(uint8_t styleIdx, uint32_t codepoint, uint16_t* outAdvance) const;
   // Merge sortedNew (sorted by codepoint, no overlap with existing) into the
-  // advance table for styleIdx, preserving sort order; cap-truncates the tail.
-  // Grows the table only when the merge exceeds its capacity.
+  // advance table for styleIdx, preserving sort order. Entries already in the
+  // table are never dropped; once the cap is reached the tail of sortedNew is
+  // left out. Grows the table only when the merge exceeds its capacity.
   void mergeIntoAdvanceTable(uint8_t styleIdx, const AdvanceEntry* sortedNew, uint32_t newCount);
   // Ensures room for `needed` entries, at least doubling the capacity when it grows.
   bool growAdvanceTable(uint8_t styleIdx, uint32_t needed);
