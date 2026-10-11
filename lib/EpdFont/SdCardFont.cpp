@@ -1473,11 +1473,12 @@ void SdCardFont::mergeIntoAdvanceTable(uint8_t styleIdx, const AdvanceEntry* sor
   const uint32_t oldSize = advanceTableSize_[styleIdx];
   if (oldSize >= ADVANCE_CACHE_LIMIT) return;  // already full
 
-  // Cap the merged size at ADVANCE_CACHE_LIMIT. Anything past the cap is
-  // dropped from the tail of the sorted merge — a deterministic, bounded loss
-  // that doesn't bias which codepoints get cached on subsequent passes.
-  uint32_t mergedCap = oldSize + newCount;
-  if (mergedCap > ADVANCE_CACHE_LIMIT) mergedCap = ADVANCE_CACHE_LIMIT;
+  // Entries already paid for with an SD read stay. Only the tail of the new
+  // batch is left out when the cap is reached: dropping existing entries by
+  // codepoint instead evicted the high end of a script block (the ㅎ-row of
+  // Hangul, with some of Korean's most frequent syllables) on every merge.
+  if (newCount > ADVANCE_CACHE_LIMIT - oldSize) newCount = ADVANCE_CACHE_LIMIT - oldSize;
+  const uint32_t mergedCap = oldSize + newCount;
 
   if (!growAdvanceTable(styleIdx, mergedCap)) {
     LOG_ERR("SDCF", "mergeIntoAdvanceTable: alloc failed (%u entries) style %u", mergedCap, styleIdx);
@@ -1485,19 +1486,12 @@ void SdCardFont::mergeIntoAdvanceTable(uint8_t styleIdx, const AdvanceEntry* sor
   }
 
   // Merge from the back so existing entries move at most once and are never
-  // overwritten before they are read. The largest `drop` entries fall past the cap.
+  // overwritten before they are read.
   AdvanceEntry* table = advanceTable_[styleIdx];
-  uint32_t drop = oldSize + newCount - mergedCap;
-  uint32_t i = oldSize, j = newCount, k = oldSize + newCount;
+  uint32_t i = oldSize, j = newCount, k = mergedCap;
   while (j > 0) {
     const bool takeNew = i == 0 || sortedNew[j - 1].codepoint >= table[i - 1].codepoint;
-    const AdvanceEntry entry = takeNew ? sortedNew[--j] : table[--i];
-    --k;
-    if (drop > 0) {
-      --drop;
-    } else {
-      table[k] = entry;
-    }
+    table[--k] = takeNew ? sortedNew[--j] : table[--i];
   }
   advanceTableSize_[styleIdx] = mergedCap;
 }
@@ -1579,6 +1573,11 @@ int SdCardFont::fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCoun
     totalMissed += static_cast<int>(missedThisStyle);
 
     if (needCount == 0) continue;
+
+    // The merge keeps only the lowest codepoints that still fit; do not read
+    // the rest from SD. The codepoint input is sorted, so the mappings are too.
+    const uint32_t room = ADVANCE_CACHE_LIMIT - advanceTableSize_[si];
+    if (needCount > room) needCount = room;
 
     // Sort by glyph index so SD reads are mostly sequential.
     std::sort(mappings.get(), mappings.get() + needCount,
