@@ -3,10 +3,12 @@
 #include <BidiUtils.h>
 #include <HalGPIO.h>
 #include <I18n.h>
+#include <Utf8.h>
 
 #include <algorithm>
 #include <cstring>
 
+#include "HangulKeyboardLayout.h"
 #include "HapticFeedback.h"
 #include "KeyboardLayoutSet.h"
 #include "MappedInputManager.h"
@@ -143,6 +145,7 @@ void KeyboardEntryActivity::onEnter() {
   shifted = false;
   symbols = false;
   urlPanel = false;
+  hangul.reset();
   cursorMode = false;
   togglePos = false;
   passwordVisible = false;
@@ -165,12 +168,62 @@ void KeyboardEntryActivity::onEnter() {
 void KeyboardEntryActivity::onExit() { Activity::onExit(); }
 
 const fui::KeyboardLayout& KeyboardEntryActivity::currentLayout() const {
-  if (symbols) return fui::builtinKeyboardLayout(layoutId, shifted, true);
+  if (symbols) {
+    // The app-defined Korean layout borrows the English symbol layers; its
+    // bottom row keeps the language key like the SDK's non-Latin tables.
+    if (onHangulLayout())
+      return fui::builtinKeyboardLayout(fui::KeyboardLayoutId::QwertyEn, shifted, true, false, true);
+    return fui::builtinKeyboardLayout(layoutId, shifted, true);
+  }
   if (inputType == InputType::Url) {
     if (urlPanel) return URL_SNIPPET_LAYOUT;
     return shifted ? URL_SHIFT_LAYOUT : URL_LAYOUT;
   }
+  if (onHangulLayout()) return keyboard_layouts::hangulKeyboardLayout(shifted);
   return fui::builtinKeyboardLayout(layoutId, shifted, false, /*numberRow=*/true, showLangKey);
+}
+
+bool KeyboardEntryActivity::onHangulLayout() const { return layoutId == keyboard_layouts::HANGUL_KO; }
+
+bool KeyboardEntryActivity::hangulInSync() const {
+  const size_t n = hangul.composingBytes();
+  if (n == 0 || cursorPos < n || cursorPos > text.length()) return false;
+  char expected[4];
+  hangul.composingText(expected);
+  return text.compare(cursorPos - n, n, expected) == 0;
+}
+
+void KeyboardEntryActivity::applyHangulEdit(const HangulComposer::Edit& edit) {
+  text.erase(cursorPos - edit.eraseBytes, edit.eraseBytes);
+  cursorPos -= edit.eraseBytes;
+  const size_t n = strlen(edit.insert);
+  text.insert(cursorPos, edit.insert, n);
+  cursorPos += n;
+}
+
+bool KeyboardEntryActivity::insertKeyText(const char* out) {
+  if (!out || !*out) return false;
+  if (onHangulLayout() && !symbols) {
+    if (!hangulInSync()) hangul.reset();
+    const auto* p = reinterpret_cast<const unsigned char*>(out);
+    const uint32_t cp = utf8NextCodepoint(&p);
+    if (*p == 0 && HangulComposer::isJamo(cp)) {
+      // Feed a copy first: completing a syllable replaces bytes without
+      // growing the field, so only the resulting length is checked.
+      HangulComposer next = hangul;
+      HangulComposer::Edit edit;
+      if (next.feed(cp, edit)) {
+        if (maxLength != 0 && text.length() - edit.eraseBytes + strlen(edit.insert) > maxLength) return false;
+        hangul = next;
+        applyHangulEdit(edit);
+        return true;
+      }
+    }
+  }
+  hangul.reset();
+  const size_t before = text.length();
+  insertUtf8(out);
+  return text.length() != before;
 }
 
 const fui::KeyboardKey* KeyboardEntryActivity::selectedKey() const {
@@ -276,6 +329,7 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
     case fui::QWERTY_KEY_SHIFT:
       delPressCount = 0;
       hintVisible = false;
+      // Not a composition break: 있 is typed as ㅇ ㅣ Shift ㅅ.
       // Letters: case toggle. Symbols: pages between "?123" and "#+=".
       shifted = !shifted;
       clampSelection();
@@ -283,6 +337,7 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
     case fui::QWERTY_KEY_MODE:
       delPressCount = 0;
       hintVisible = false;
+      hangul.reset();
       if (urlPanel) {
         urlPanel = false;
       } else {
@@ -294,6 +349,7 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
     case fui::QWERTY_KEY_LANG: {
       delPressCount = 0;
       hintVisible = false;
+      hangul.reset();
       const fui::KeyboardLayoutId nextId = keyboard_layouts::next(layoutId);
       // The non-Latin tables draw the key even with one layout enabled; a
       // full-screen e-ink repaint for an unchanged keyboard costs a second.
@@ -321,6 +377,7 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
       if (longPress) {
         text.clear();
         cursorPos = 0;
+        hangul.reset();
         return true;
       }
       delPressCount++;
@@ -328,6 +385,14 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
         hintVisible = true;
         hintShowTime = millis();
       }
+      if (hangulInSync()) {
+        HangulComposer::Edit edit;  // one jamo off the composing syllable
+        if (hangul.backspace(edit)) {
+          applyHangulEdit(edit);
+          return true;
+        }
+      }
+      hangul.reset();
       backspaceUtf8();
       return true;
     default: {
@@ -338,7 +403,7 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
       const char* out = longPress ? fui::keyboardAltOutputFor(layer, value) : nullptr;
       if (!out) out = fui::keyboardOutputFor(layer, value);
       if (!out) return false;
-      insertUtf8(out);
+      insertKeyText(out);
       if (shifted && !symbols) {
         shifted = false;  // shift auto-releases after one character
         clampSelection();
@@ -354,12 +419,13 @@ bool KeyboardEntryActivity::clearAllOrAltOnSelected() {
   if (key->value == fui::QWERTY_KEY_BACKSPACE) {
     text.clear();
     cursorPos = 0;
+    hangul.reset();
     return true;
   }
   // Explicit alts and the letter case-flip, same as touch long-press.
   const char* alt = fui::keyboardAltOutputFor(currentLayout(), key->value);
   if (alt) {
-    insertUtf8(alt);
+    insertKeyText(alt);
     return true;
   }
   return false;
@@ -371,14 +437,17 @@ std::string KeyboardEntryActivity::displayTextForCurrentState() const {
     return displayText;
   }
 
-  size_t revealPos;
-  if (cursorMode) {
-    revealPos = text.length();  // no reveal in displayText; block draws actual char directly
-  } else {
-    revealPos = (text.length() > 0 && cursorPos > 0) ? cursorPos - 1 : std::string::npos;
+  // Reveal the whole code point before the cursor (a Hangul syllable being
+  // composed is three bytes). Other bytes mask one-for-one so displayText
+  // keeps text's length; cursor drawing and hit-testing rely on that.
+  size_t revealStart = 0;
+  size_t revealEnd = 0;  // empty: no reveal in cursor mode (the block draws the char)
+  if (!cursorMode && cursorPos > 0 && cursorPos <= text.length()) {
+    revealStart = utf8Prev(text, cursorPos);
+    revealEnd = cursorPos;
   }
   for (size_t i = 0; i < displayText.length(); i++) {
-    if (i != revealPos) {
+    if (i < revealStart || i >= revealEnd) {
       displayText[i] = '*';
     }
   }
@@ -957,8 +1026,8 @@ void KeyboardEntryActivity::render(RenderLock&&) {
       }
     } else {
       const char* altCharTip;
-      if (inputType == InputType::Url) {
-        altCharTip = tr(STR_KB_HINT_SECONDARY_CHAR);
+      if (inputType == InputType::Url || onHangulLayout()) {
+        altCharTip = tr(STR_KB_HINT_SECONDARY_CHAR);  // no letter case to flip
       } else if (shifted) {
         altCharTip = tr(STR_KB_HINT_LOWER_SECONDARY);
       } else {
@@ -1008,6 +1077,10 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   props.gap = props.rowGap = static_cast<int16_t>(keyboardGap(metrics));
   if (urlPanel) props.uniformKeyWidth = false;  // Shortcut rows stretch independently.
   if (!mappedInput.hasTouch()) props.background = fui::Paint::none();
+  if (onHangulLayout() && !symbols) {
+    renderer.prewarmFallbackText(UI_12_FONT_ID, keyboard_layouts::HANGUL_KEYBOARD_GLYPHS);
+    renderer.prewarmFallbackText(SMALL_FONT_ID, keyboard_layouts::HANGUL_KEYBOARD_GLYPHS);
+  }
   frame.target().fill(kbRect, props.background);
   const int bottomEdge =
       mappedInput.hasTouch() ? renderer.getScreenHeight() : renderer.getScreenHeight() - metrics.buttonHintsHeight;
