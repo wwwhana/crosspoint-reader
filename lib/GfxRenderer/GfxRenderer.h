@@ -97,18 +97,15 @@ class GfxRenderer {
   mutable int clipRight_ = 32767;
   mutable int clipBottom_ = 32767;
 
-  // CJK UI font fallback map: primary (built-in, Latin-only) UI font id -> a
-  // size-matched SD-card font id that carries CJK glyphs. When a string drawn
-  // or measured with a mapped primary font contains a CJK codepoint the primary
-  // cannot render, the whole string is routed to the mapped fallback so it
-  // appears at the same point size as the surrounding UI text. Populated by the
-  // app-level SD font setup when an SD family is loaded. See resolveTextFontId().
+  // UI font map: built-in UI font id -> the size-matched font of the SD family
+  // selected for reading. A mapped UI string draws in the SD family unless it
+  // has a glyph only the built-in font covers. Populated by the app-level SD
+  // font setup when an SD family is loaded. See resolveTextFontId().
   std::map<int, int> fallbackFontMap_;
 
-  // If `text` contains a CJK codepoint that `fontId` cannot render and `fontId`
-  // has a registered fallback, returns the fallback id; otherwise returns
-  // fontId unchanged. The whole string is routed as a unit so each draw/measure
-  // call stays single-font (consistent bit depth, metrics, wrapping).
+  // Returns the SD font mapped to `fontId`, unless `text` needs a glyph only
+  // `fontId` has and none only the SD font has. The whole string is routed as
+  // a unit so each draw/measure call stays single-font (bit depth, metrics).
   int resolveTextFontId(int fontId, const char* text, EpdFontFamily::Style style) const;
 
   // Batch-load `text`'s glyphs into an SD-card font's resident mini tables
@@ -154,7 +151,7 @@ class GfxRenderer {
   }
   void setFontCacheManager(FontCacheManager* m) { fontCacheManager_ = m; }
   FontCacheManager* getFontCacheManager() const { return fontCacheManager_; }
-  // Batch-prewarm CJK fallback glyphs for a screenful of static strings in ONE
+  // Batch-prewarm SD UI-font glyphs for a screenful of static strings in ONE
   // SD pass. List screens redraw every visible row on each repaint; without an
   // up-front batch each row's draw prewarms per-string, and under heap
   // pressure (union merge disabled) each string evicts the previous one — SD
@@ -192,7 +189,7 @@ class GfxRenderer {
   void registerTtfFont(int fontId, TtfEpdFont* font) { ttfFonts_[fontId] = font; }
   void unregisterTtfFont(int fontId) { ttfFonts_.erase(fontId); }
   const std::map<int, TtfEpdFont*>& getTtfFonts() const { return ttfFonts_; }
-  // Register/clear size-matched CJK UI fallbacks (see fallbackFontMap_).
+  // Register/clear the size-matched SD UI fonts (see fallbackFontMap_).
   // setFallbackFont maps a primary UI font id to an SD font id of the same size.
   void setFallbackFont(int primaryFontId, int fallbackFontId) { fallbackFontMap_[primaryFontId] = fallbackFontId; }
   void clearFallbackFonts() { fallbackFontMap_.clear(); }

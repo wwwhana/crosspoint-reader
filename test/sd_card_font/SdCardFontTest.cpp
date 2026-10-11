@@ -394,6 +394,30 @@ TEST(SdCardFontTest, RedrawingAPrewarmedPageReadsNothing) {
   }
 }
 
+TEST(SdCardFontTest, ResidentUiStringsSkipTheRebuild) {
+  makeFont();
+  SdCardFont font;
+  ASSERT_TRUE(font.load("fixture"));
+  const std::string row = page(FIRST, 10);
+  ASSERT_EQ(0, font.prewarm(row.c_str(), 1, false, false));
+  // A resident string neither allocates the codepoint scratch nor reads the SD.
+  constexpr size_t SCRATCH_BYTES = SdCardFont::MAX_PAGE_GLYPHS * sizeof(uint32_t);
+  failNextArraySize = SCRATCH_BYTES;
+  sdFontTestReads = 0;
+  EXPECT_EQ(0, font.prewarm(page(FIRST + 2, 5).c_str(), 1, false, false));
+  EXPECT_EQ(0, font.prewarm(page(FIRST + 2, 5).c_str(), 1, true, false));  // metadata from a full mini
+  EXPECT_EQ(SCRATCH_BYTES, failNextArraySize);
+  EXPECT_EQ(0U, sdFontTestReads);
+  // A string with a glyph that is not resident still takes the full path.
+  EXPECT_EQ(-1, font.prewarm(page(FIRST + 20, 2).c_str(), 1, false, false));
+  EXPECT_EQ(0U, failNextArraySize);
+  // Codepoints the font does not cover count as missed without a rebuild.
+  failNextArraySize = SCRATCH_BYTES;
+  EXPECT_EQ(1, font.prewarm((page(FIRST, 2) + "\xE2\x98\x83").c_str(), 1, false, false));
+  EXPECT_EQ(SCRATCH_BYTES, failNextArraySize);
+  failNextArraySize = 0;
+}
+
 TEST(SdCardFontTest, LaterPagesReadOnlyTheKernClassBlocksTheyUse) {
   makeKerningFont(300);  // five 64-entry blocks per class table
   SdCardFont font;

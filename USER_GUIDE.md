@@ -601,6 +601,8 @@ There are three ways to install fonts:
 
 Once installed, custom fonts appear in **Settings → Reader → Font Family** alongside the built-in fonts.
 
+A selected custom font also draws the menus, when the family includes the 8, 10 and 12 pt UI sizes.
+
 See [docs/sd-card-fonts.md](./docs/sd-card-fonts.md) for full installation details and SD card folder structure.
 
 ---
@@ -662,7 +664,7 @@ CrossPoint renders text using the following Unicode character blocks, enabling s
 * **Cyrillic Script (Standard and Extended):** Covers Russian, Ukrainian, Belarusian, Bulgarian, Serbian, Macedonian, Kazakh, Kyrgyz, Mongolian, and others.
 * **Vietnamese:** Supported via extended Latin glyph coverage in the built-in reader fonts.
 
-The UI includes Arabic and Hebrew (menus use built-in fonts with presentation-form coverage). Built-in **reader** fonts do not cover Chinese, Japanese, Korean, Arabic, Greek, Hebrew, or Farsi for book text. **CJK, Hebrew, Arabic, Greek, and other extended scripts can be enabled for reading by installing custom SD card fonts** — see [Custom Fonts (SD Card)](#38-custom-fonts-sd-card).
+The UI includes Arabic and Hebrew (the built-in menu fonts have presentation-form coverage; a selected custom font with UI sizes draws the menus instead). Built-in **reader** fonts do not cover Chinese, Japanese, Korean, Arabic, Greek, Hebrew, or Farsi for book text. **CJK, Hebrew, Arabic, Greek, and other extended scripts can be enabled for reading by installing custom SD card fonts** — see [Custom Fonts (SD Card)](#38-custom-fonts-sd-card).
 
 ---
 

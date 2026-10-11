@@ -344,6 +344,11 @@ class SdCardFont {
   void applyKernLigaturePointers(PerStyle& s, EpdFontData& data) const;
   void applyGlyphMissCallback(uint8_t styleIdx);
   int32_t findGlobalGlyphIndex(const PerStyle& s, uint32_t codepoint) const;
+  static bool miniContains(const PerStyle& s, uint32_t codepoint);
+  // True when no style in styleMask needs a rebuild for `text`: each glyph is
+  // resident or outside the font (counted in `missed`). Kern/ligature
+  // requests are excluded; they may need tables the check does not cover.
+  bool textResident(const char* text, uint8_t styleMask, bool metadataOnly, int& missed) const;
   int fetchAdvancesForCodepoints(uint32_t* codepoints, uint32_t cpCount, uint8_t styleMask);
   int prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly, bool loadKernLig,
                    bool accumulate);
