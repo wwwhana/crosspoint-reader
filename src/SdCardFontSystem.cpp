@@ -53,9 +53,8 @@ void snapFontPointSizeTo(const uint8_t availablePointSize) {
 }
 
 // Built-in UI fonts and their physical point sizes (at 150 DPI, matching the
-// SD-font converter). Each is paired with a same-size SD fallback so UI text
-// in scripts the built-ins lack (CJK, Greek, Cyrillic, ...) matches the
-// surrounding Latin. See SdCardFontSystem::setupUiFallbacks.
+// SD-font converter). Each is paired with the selected SD family's same-size
+// font, which then draws the UI. See SdCardFontSystem::setupUiFallbacks.
 struct UiFontSize {
   int fontId;
   uint8_t pointSize;
@@ -194,48 +193,12 @@ void SdCardFontSystem::ensureLoaded(GfxRenderer& renderer) {
 
 void SdCardFontSystem::setupUiFallbacks(GfxRenderer& renderer) {
   const std::string& familyName = manager_.currentFamilyName();
-  if (familyName.empty()) return;  // no SD family loaded — nothing to fall back to
+  if (familyName.empty()) return;  // no SD family loaded: the built-in UI fonts stay
 
   const auto* family = registry_.findFamily(familyName);
   if (!family) return;
 
-  // Probe the already-loaded reader-size font before paying for the UI sizes:
-  // resolveTextFontId only redirects on codepoints the built-in UI fonts lack,
-  // so a family with no coverage beyond theirs can never act as a fallback and
-  // its UI sizes would be dead weight in RAM.
-  const auto readerIt = renderer.getFontMap().find(manager_.getFontId(familyName));
-  if (readerIt == renderer.getFontMap().end()) return;
-  // One representative codepoint per script the built-in fonts may lack,
-  // matching the non-Latin interval presets the SD-font converter ships
-  // (docs/sd-card-fonts.md).
-  static constexpr uint32_t kFallbackProbes[] = {
-      0x4E00,  // CJK Unified Ideographs (Han)
-      0x3042,  // Hiragana
-      0x30A2,  // Katakana
-      0xAC00,  // Hangul Syllables
-      0x03B1,  // Greek
-      0x0430,  // Cyrillic
-      0x05D0,  // Hebrew
-      0x0627,  // Arabic
-      0x0531,  // Armenian
-      0x10D0,  // Georgian
-      0x1200,  // Ethiopic
-      0x13A0,  // Cherokee
-      0x2D30,  // Tifinagh
-      0x0259,  // IPA Extensions (ə)
-  };
-  bool hasFallbackScript = false;
-  for (const uint32_t cp : kFallbackProbes) {
-    if (readerIt->second.hasCodepoint(cp)) {
-      hasFallbackScript = true;
-      break;
-    }
-  }
-  if (!hasFallbackScript) {
-    LOG_DBG("SDFS", "%s has no fallback-script coverage - skipping UI fallback sizes", familyName.c_str());
-    return;
-  }
-
+  // The menus use the family selected for reading at the UI sizes it ships.
   for (const auto& ui : kUiFontSizes) {
     const int sdFontId = manager_.loadFamilyExtraSize(*family, renderer, ui.pointSize);
     if (sdFontId != 0) {

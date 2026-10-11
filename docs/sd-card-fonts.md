@@ -83,40 +83,34 @@ tab in File Transfer accepts `.cpfont` files only. Copy direct fonts to the SD
 card instead. To remove a loose font file, delete that file from the SD card.
 The Fonts page can delete families stored in subfolders.
 
-## Non-Latin Scripts Fallback in the User Interface
+## SD Card Fonts in the User Interface
 
-The built-in UI fonts are Latin-only, so by default the interface (book titles
-in the library, file names in the browser, list rows, headers) shows
-replacement boxes for non-Latin text — CJK, Greek, Cyrillic, Armenian, and any
-other script the SD-font converter ships an interval for — even when book
-*content* renders correctly with a selected SD-card font.
+The built-in UI fonts cover Latin, Cyrillic, Hebrew letters and core Arabic,
+but no Greek, CJK or Hangul. Without an SD-card font the interface (book titles in the
+library, file names in the browser, list rows, headers) shows replacement boxes
+for those scripts, even when book *content* renders correctly.
 
-To avoid shipping every script's glyph set in flash, CrossPoint instead reuses
-the SD-card font you already selected: when a UI string contains a character
-the built-in font cannot draw, that whole string is rendered with your selected
-SD-card font instead.
+To avoid shipping every script's glyph set in flash, CrossPoint reuses the
+SD-card font you selected under **Settings > Reader > Font Family**: once one is
+selected, the interface is drawn with it too, Latin text included. This applies
+to any family, not only non-Latin ones.
 
-The fallback is **size-matched**. The built-in UI fonts render at 8 pt
+The UI fonts are **size-matched**. The built-in UI fonts render at 8 pt
 (small/author lines), 10 pt (list rows) and 12 pt (book-cover titles, headers),
-so CrossPoint loads your SD family at those sizes too and maps each UI font to
-its same-size SD font. Non-Latin book names therefore appear at the same size
-as the Latin text around them. A `.cpfont` family must contain files at sizes
-**8, 10 and 12** for this UI fallback (in addition to the reader sizes 12–18) —
-**missing these is the most common reason non-Latin UI text still shows
-replacement boxes even though the book itself renders fine.** Any missing UI
-size keeps showing boxes for that script at that size. Direct TTF/OTF/TTC
-families use the same file at all three UI sizes.
-
-These UI sizes only take effect if the reader-size font also matches one of
-CrossPoint's built-in fallback-detection codepoints — see `kFallbackProbes` in
-`src/SdCardFontSystem.cpp` for the current list. A script outside that list
-gets no UI fallback even with the correct `.cpfont` sizes present.
+so CrossPoint loads your SD family at those sizes and maps each UI font to its
+same-size SD font. A `.cpfont` family must contain files at sizes **8, 10 and
+12** (in addition to the reader sizes 12–18) for the interface to use it. A UI
+size the family does not ship stays on the built-in font at that size, which
+shows replacement boxes for scripts the built-in font lacks — **the most common
+reason non-Latin UI text shows boxes even though the book renders fine.**
+Direct TTF/OTF/TTC families use the same file at all three UI sizes when
+enough RAM is free; otherwise the interface stays on the built-in fonts.
 
 For `.cpfont` families, **Settings > Reader > Font Size** lists every size the family ships,
 so a family built at 8,10,12,14,16,18 offers all six as reading sizes — the UI
 sizes are not hidden from the list. Reading at 8 pt is your call; if you would
 rather not see the small sizes there, convert two families (one with the UI
-sizes for fallback, one with only the reading sizes you want).
+sizes, one with only the reading sizes you want).
 
 When converting your own font, include the UI sizes:
 
@@ -130,25 +124,23 @@ When converting your own font, include the UI sizes:
 
 What this means in practice:
 
-- Select a non-Latin-capable SD font under **Settings > Reader > Font Family**
-  (see [Installing Fonts](#installing-fonts) and the interval presets for
-  `.cpfont` under [Converting Custom Fonts](#converting-custom-fonts)). That
-  single selection drives both book content *and* size-matched fallback in
-  the UI.
-- Pure-Latin UI strings keep the crisp built-in font; only strings that
-  actually contain a character the built-in font lacks are routed to the SD
-  font.
-- The fallback is per *string*, not per glyph: a mixed title such as
-  `三体 Vol.1` renders entirely in the SD font (including the Latin part). If
-  that SD font is a `Mono` family, the Latin portion will appear half/full
-  width.
-- If no SD font is selected (a built-in reading font is active), there is no
-  fallback and the UI again shows boxes for non-Latin text — pick an SD font
-  covering that script to restore it.
-- The same fallback draws the Korean UI translation and the Korean keyboard's
-  key labels. Select a Hangul family (Pretendard, RIDIBatang, MaruBuri) as the
-  reader font before switching the UI language to Korean; without one the
-  menus and the jamo keys show replacement boxes, though typing still works.
+- One selection under **Settings > Reader > Font Family** sets both book
+  content *and* the interface (see [Installing Fonts](#installing-fonts) and
+  the interval presets for `.cpfont` under
+  [Converting Custom Fonts](#converting-custom-fonts)).
+- The choice is per *string*, not per glyph. A string with a character only
+  the SD font has always uses the SD font. Otherwise a string with a character
+  the SD font lacks but the built-in font has uses the built-in font, so a
+  CJK-only family leaves Latin-only menu rows on the built-in font. Every
+  other string, plain Latin included, uses the SD font.
+- A `Mono` family sets the Latin menu text in its half/full widths too.
+- A family without a bold face draws bold headings in its regular weight.
+- If no SD font is selected (a built-in reading font is active), the built-in
+  UI fonts are used and scripts they lack show boxes.
+- The Korean UI translation and the Korean keyboard's key labels need a Hangul
+  family (Pretendard, RIDIBatang, MaruBuri) selected as the reader font; without
+  one the menus and the jamo keys show replacement boxes, though typing still
+  works.
 
 ## Available Pre-Built Fonts
 
@@ -185,10 +177,9 @@ To make `.cpfont` files for any device, convert your TrueType/OpenType fonts:
       --name MyFont \
       --output-dir ./MyFont/
 
-> **Using this font for non-Latin UI fallback too?** The examples above only
-> include the reader sizes (12–18). To also get fallback for this font's
-> script in the library, headers, and file browser (see
-> [Non-Latin Scripts Fallback in the User Interface](#non-latin-scripts-fallback-in-the-user-interface)),
+> **Using this font for the interface too?** The examples above only include
+> the reader sizes (12–18). For the library, headers, and file browser to use
+> it (see [SD Card Fonts in the User Interface](#sd-card-fonts-in-the-user-interface)),
 > add the UI sizes: `--sizes 8,10,12,14,16,18`.
 
 ### Available Unicode interval presets

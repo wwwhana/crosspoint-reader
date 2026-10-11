@@ -273,20 +273,19 @@ int GfxRenderer::resolveTextFontId(const int fontId, const char* text, const Epd
   }
   const EpdFontFamily& primary = fontIt->second;
   const EpdFontFamily& fallback = fallbackIt->second;
+  // The selected SD family draws all UI text it can. A glyph only it has
+  // forces it (a Hangul title must not draw as boxes); otherwise a glyph only
+  // the built-in font has keeps the built-in (Latin under a CJK-only family).
   const char* cursor = text;
+  bool builtInOnly = false;
   uint32_t cp;
   while ((cp = utf8NextCodepoint(reinterpret_cast<const uint8_t**>(&cursor)))) {
-    // Redirect whenever the primary font cannot draw a codepoint the fallback
-    // can — otherwise the string renders with holes. Not just CJK: Greek,
-    // Cyrillic, or any script the built-in UI fonts lack qualifies. ASCII is
-    // skipped outright (every registered font covers it), keeping Latin
-    // strings on the fast path, and a partial-coverage fallback is not worth
-    // dragging the whole string into for glyphs it would also miss.
-    if (cp >= 0x80 && !primary.hasCodepoint(cp, style) && fallback.hasCodepoint(cp, style)) {
-      return fallbackFontId;
-    }
+    const bool inFallback = fallback.hasCodepoint(cp, style);
+    const bool inPrimary = primary.hasCodepoint(cp, style);
+    if (inFallback && !inPrimary) return fallbackFontId;
+    if (!inFallback && inPrimary) builtInOnly = true;
   }
-  return fontId;
+  return builtInOnly ? fontId : fallbackFontId;
 }
 
 void GfxRenderer::prewarmFallbackText(const int fontId, const TextGetter getter, const void* ctx,
@@ -295,7 +294,7 @@ void GfxRenderer::prewarmFallbackText(const int fontId, const TextGetter getter,
     return;
   }
   // Resolve the fallback id from the first string that actually redirects; a
-  // screen with no non-Latin strings resolves nothing and this is a no-op.
+  // screen whose strings all stay on the built-in font is a no-op.
   int fallbackFontId = fontId;
   for (uint32_t i = 0; i < textCount && fallbackFontId == fontId; i++) {
     const char* text = getter(ctx, i);
@@ -345,8 +344,8 @@ void GfxRenderer::ensureSdGlyphsResident(const int fontId, const char* text, con
   }
   // SUP/SUB bits don't select a distinct .cpfont style bitstream — mask to the
   // base style. resolveStyleMask() inside prewarm folds absent styles.
-  // loadKernLig=false: redirected fallback strings (non-Latin titles,
-  // filenames) have no useful kern pairs, and the ~3KB class-table load plus
+  // loadKernLig=false: redirected UI strings (titles, rows,
+  // filenames) gain little from kern pairs, and the ~3KB class-table load plus
   // per-rebuild mini-matrix build cost heap and SD time exactly where these
   // strings live (heap-tight UI screens). The reader's PrewarmScope path keeps
   // kern; a kern-wanting request that subset-hits a kern-free mini tops the
@@ -665,7 +664,7 @@ int GfxRenderer::getTextWidth(const int fontId, const char* text, const EpdFontF
   }
 
   // Measure with the same font drawText would render with (see resolveTextFontId)
-  // so wrapping, truncation and centering of non-Latin strings stay consistent.
+  // so wrapping, truncation and centering of redirected strings stay consistent.
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
   const auto fontIt = fontMap.find(resolvedFontId);
   if (fontIt == fontMap.end()) {
@@ -702,8 +701,7 @@ void GfxRenderer::drawText(const int fontId, const int x, const int y, const cha
     return;
   }
 
-  // Route non-Latin strings to the fallback font when the requested font
-  // lacks the glyphs (e.g. Chinese book titles drawn with a Latin UI font).
+  // UI fonts route to the selected SD family when one is mapped (see resolveTextFontId).
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
 
   std::string visual;
@@ -2112,7 +2110,7 @@ int GfxRenderer::getKerning(const int fontId, const uint32_t leftCp, const uint3
 
 int GfxRenderer::getTextAdvanceX(const int fontId, const char* text, EpdFontFamily::Style style, const int8_t tracking,
                                  const BidiUtils::BidiBaseDir baseDir, const TextMeasureMode mode) const {
-  // Match the font drawText would use for non-Latin strings (see resolveTextFontId).
+  // Match the font drawText would use (see resolveTextFontId).
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
   // Measure the exact codepoint stream drawText renders: bidi-reordered and
   // Arabic-shaped (contextual presentation forms, Lam-Alef collapse).
@@ -2239,7 +2237,7 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
     return;
   }
 
-  // Route non-Latin strings to the fallback font (see resolveTextFontId).
+  // UI fonts route to the selected SD family when one is mapped (see resolveTextFontId).
   const int resolvedFontId = resolveTextFontId(fontId, text, style);
   // Redirected to the SD fallback: batch-load the string's glyphs so the draw
   // loop below doesn't fault them in one SD read at a time (#2725).
@@ -2253,6 +2251,9 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
   }
 
   const auto& font = fontIt->second;
+  // The caller centered this line with the requested font's metrics; center
+  // the redirected font's line box inside it, as drawText does.
+  const int lineX = resolvedFontId == fontId ? x : x + (getLineHeight(fontId) - getLineHeight(resolvedFontId)) / 2;
 
   int lastBaseY = y;
   int lastBaseLeft = 0;
@@ -2276,7 +2277,7 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
       const auto anchor = combiningMark::anchorFor(cp);
       const int raiseBy =
           combiningMark::raiseAboveBase(anchor, combiningGlyph->top, combiningGlyph->height, lastBaseTop);
-      const int combiningX = x - raiseBy;
+      const int combiningX = lineX - raiseBy;
       const int combiningY = combiningMark::anchorOverRotated90CW(anchor, lastBaseY, lastBaseLeft, lastBaseWidth,
                                                                   combiningGlyph->left, combiningGlyph->width);
       renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, combiningX, combiningY, black, style);
@@ -2300,7 +2301,7 @@ void GfxRenderer::drawTextRotated90CW(const int fontId, const int x, const int y
     lastBaseTop = glyph ? glyph->top : 0;
     prevAdvanceFP = glyph ? glyph->advanceX : 0;  // 12.4 fixed-point
 
-    renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, x, lastBaseY, black, style);
+    renderCharImpl<TextRotation::Rotated90CW>(*this, renderMode, font, cp, lineX, lastBaseY, black, style);
     prevCp = cp;
   }
 }

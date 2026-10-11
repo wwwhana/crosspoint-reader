@@ -843,6 +843,14 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
   styleMask = resolveStyleMask(styleMask);
   if (styleMask == 0) return 0;
 
+  // UI repaints prewarm every string they measure and draw. When its glyphs
+  // are already resident, answer before the 2 KB scratch and the dedup pass.
+  if (textCount == 1 && (metadataOnly || !loadKernLig)) {
+    int missed = 0;
+    const char* text = getter(ctx, 0);
+    if (text != nullptr && textResident(text, styleMask, metadataOnly, missed)) return missed;
+  }
+
   unsigned long startMs = millis();
 
   // Cap the unique-codepoint budget by what the heap can actually hold as a
@@ -1001,6 +1009,38 @@ int SdCardFont::prewarm(TextGetter getter, const void* ctx, uint32_t textCount, 
 
   stats_.prewarmTotalMs = millis() - startMs;
   return totalMissed;
+}
+
+bool SdCardFont::miniContains(const PerStyle& s, const uint32_t codepoint) {
+  uint32_t lo = 0;
+  uint32_t hi = s.miniIntervalCount;
+  while (lo < hi) {
+    const uint32_t mid = lo + (hi - lo) / 2;
+    if (codepoint < s.miniIntervals[mid].first) {
+      hi = mid;
+    } else if (codepoint > s.miniIntervals[mid].last) {
+      lo = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool SdCardFont::textResident(const char* text, const uint8_t styleMask, const bool metadataOnly, int& missed) const {
+  missed = 0;
+  for (uint8_t si = 0; si < MAX_STYLES; si++) {
+    if (!(styleMask & (1 << si)) || !styles_[si].present) continue;
+    const auto& s = styles_[si];
+    if (s.miniGlyphCount == 0 || (s.miniMetadataOnly && !metadataOnly)) return false;
+    const auto* p = reinterpret_cast<const unsigned char*>(text);
+    while (const uint32_t cp = utf8NextCodepoint(&p)) {
+      if (miniContains(s, cp)) continue;
+      if (findGlobalGlyphIndex(s, cp) >= 0) return false;
+      missed++;
+    }
+  }
+  return true;
 }
 
 int SdCardFont::prewarmStyle(uint8_t styleIdx, const uint32_t* codepoints, uint32_t cpCount, bool metadataOnly,
